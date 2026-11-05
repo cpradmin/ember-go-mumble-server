@@ -57,16 +57,24 @@ type writeReq struct {
 	payload []byte
 }
 
-// New creates a new connection.
+// New creates a new connection. The write loop is started here, before the
+// caller can enqueue anything, so a message written during connection setup
+// (e.g. the initial Version, or a kick issued the instant a client connects)
+// is always drained to the socket rather than lost to a start-up race with
+// Run. writing is set for the same reason: CloseAfterFlush must see that a
+// drainer exists and wait for the queue, not skip the flush.
 func New(c net.Conn, crypt *crypto.CryptState, onClose func(*Conn)) *Conn {
-	return &Conn{
+	conn := &Conn{
 		Conn:    c,
 		Crypt:   crypt,
 		state:   StateAuthenticating,
+		writing: true,
 		writeCh: make(chan writeReq, 64),
 		done:    make(chan struct{}),
 		onClose: onClose,
 	}
+	go conn.writeLoop()
+	return conn
 }
 
 // SessionID returns the session ID (0 until authenticated).
@@ -217,11 +225,8 @@ func (c *Conn) CloseAfterFlush() error {
 // Run runs the read and write loops.
 func (c *Conn) Run(ctx context.Context, handler protocol.HandlerTable) error {
 	defer c.Close()
-	c.mu.Lock()
-	c.writing = true
-	c.mu.Unlock()
-	go c.writeLoop()
-
+	// The write loop is already running (started in New); Run only owns the
+	// read loop.
 	for {
 		c.SetReadDeadline(time.Now().Add(30 * time.Second))
 		msgType, payload, err := protocol.ReadPacket(c.Conn)
