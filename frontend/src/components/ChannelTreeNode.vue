@@ -9,6 +9,21 @@
     >
       <template #append>
         <div class="d-flex align-center" @click.stop>
+          <v-tooltip v-if="channel.require_tunnel" text="Encrypted tunnel required — all voice relayed over TLS (AES-256-GCM)" location="top">
+            <template #activator="{ props: tipProps }">
+              <v-chip
+                v-bind="tipProps"
+                size="x-small"
+                variant="tonal"
+                density="compact"
+                color="success"
+                prepend-icon="mdi-lock"
+                class="mr-2"
+              >
+                tunnel
+              </v-chip>
+            </template>
+          </v-tooltip>
           <v-chip
             v-if="channel.crypto_mode"
             size="x-small"

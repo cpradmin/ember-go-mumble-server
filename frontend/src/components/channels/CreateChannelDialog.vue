@@ -65,6 +65,14 @@
         density="compact"
         class="mb-4"
       />
+      <v-checkbox
+        v-model="form.require_tunnel"
+        label="Require encrypted tunnel (force TLS-grade voice)"
+        hint="All voice in this channel is relayed over the TLS tunnel (AES-256-GCM), for any client, instead of direct UDP."
+        persistent-hint
+        density="compact"
+        class="mb-4"
+      />
     </v-form>
     <template #actions>
       <v-spacer />
@@ -112,6 +120,7 @@ const form = ref({
   position: 0,
   max_users: 0,
   is_temporary: false,
+  require_tunnel: false,
 })
 const loading = ref(false)
 const error = ref('')
@@ -126,6 +135,7 @@ watch([() => props.modelValue, () => props.parentId, () => props.channels], ([op
       position: 0,
       max_users: 0,
       is_temporary: false,
+      require_tunnel: false,
     }
     error.value = ''
   }
@@ -151,6 +161,7 @@ async function handleSubmit() {
       position: form.value.position || 0,
       is_temporary: form.value.is_temporary,
       max_users: form.value.max_users || 0,
+      require_tunnel: form.value.require_tunnel,
     })
     emit('created', ch)
     model.value = false
