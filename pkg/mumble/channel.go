@@ -12,4 +12,7 @@ type Channel struct {
 	IsTemporary bool
 	Links       []uint32
 	InheritACL  bool // inherit ACLs from parent; false = override
+	// RequireTunnel forces all voice in this channel over the TLS tunnel
+	// (TLS-grade AES-256-GCM) rather than direct UDP, for any client.
+	RequireTunnel bool
 }

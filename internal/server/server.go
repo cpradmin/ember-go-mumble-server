@@ -135,6 +135,9 @@ func (s *Server) Start(ctx context.Context) error {
 		} else if c, ok := ch.(*pkgmumble.Channel); ok {
 			ms.BroadcastChannelState(c)
 		}
+		// Channel config changed; refresh the force-tunnel policy set the audio
+		// path reads so a require_tunnel toggle takes effect without a restart.
+		ms.RefreshChannelForceTunnel()
 	}
 	onConfigChange := func(serverID uint) {
 		if serverID != 1 {

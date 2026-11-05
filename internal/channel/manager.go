@@ -75,15 +75,16 @@ func (m *Manager) load() {
 	for _, c := range rows {
 		nc := &channelNode{
 			Channel: &mumble.Channel{
-				ID:          uint32(c.ID),
-				ParentID:    ptrToUint32(c.ParentID),
-				Name:        c.Name,
-				Description: c.Description,
-				Position:    c.Position,
-				MaxUsers:    c.MaxUsers,
-				IsTemporary: c.IsTemporary,
-				Links:       c.Links,
-				InheritACL:  c.InheritACL,
+				ID:            uint32(c.ID),
+				ParentID:      ptrToUint32(c.ParentID),
+				Name:          c.Name,
+				Description:   c.Description,
+				Position:      c.Position,
+				MaxUsers:      c.MaxUsers,
+				IsTemporary:   c.IsTemporary,
+				Links:         c.Links,
+				InheritACL:    c.InheritACL,
+				RequireTunnel: c.RequireTunnel,
 			},
 			Children: nil,
 		}
@@ -302,14 +303,15 @@ func ptrUint(v uint32) *uint { u := uint(v); return &u }
 
 // UpdateOpts holds optional channel updates (nil = don't change).
 type UpdateOpts struct {
-	Name        *string
-	Description *string
-	Position    *int32
-	MaxUsers    *uint32
-	Temporary   *bool
-	Links       []uint32 // if non-nil, replace
-	LinksAdd    []uint32
-	LinksRemove []uint32
+	Name          *string
+	Description   *string
+	Position      *int32
+	MaxUsers      *uint32
+	Temporary     *bool
+	RequireTunnel *bool
+	Links         []uint32 // if non-nil, replace
+	LinksAdd      []uint32
+	LinksRemove   []uint32
 }
 
 // Update updates channel metadata. Returns false if channel not found or update failed.
@@ -340,6 +342,10 @@ func (m *Manager) Update(id uint32, opts UpdateOpts) bool {
 	if opts.Temporary != nil {
 		n.IsTemporary = *opts.Temporary
 		updates["is_temporary"] = *opts.Temporary
+	}
+	if opts.RequireTunnel != nil {
+		n.RequireTunnel = *opts.RequireTunnel
+		updates["require_tunnel"] = *opts.RequireTunnel
 	}
 	if opts.Links != nil {
 		n.Links = opts.Links

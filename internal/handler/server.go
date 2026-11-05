@@ -463,12 +463,13 @@ func (h *ServerHandler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ParentID    uint32 `json:"parent_id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Position    int32  `json:"position"`
-		Temporary   bool   `json:"is_temporary"`
-		MaxUsers    uint32 `json:"max_users"`
+		ParentID      uint32 `json:"parent_id"`
+		Name          string `json:"name"`
+		Description   string `json:"description"`
+		Position      int32  `json:"position"`
+		Temporary     bool   `json:"is_temporary"`
+		MaxUsers      uint32 `json:"max_users"`
+		RequireTunnel bool   `json:"require_tunnel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -484,6 +485,14 @@ func (h *ServerHandler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to create channel"}`, http.StatusInternalServerError)
 		return
 	}
+	// require_tunnel is operator policy, not part of the positional Create; apply
+	// it as an update on the fresh channel when requested so it persists and the
+	// audio-path policy set refreshes via onChannelMutated below.
+	if body.RequireTunnel {
+		if mgr.Update(ch.ID, channel.UpdateOpts{RequireTunnel: &body.RequireTunnel}) {
+			ch.RequireTunnel = true
+		}
+	}
 	if h.onChannelMutated != nil {
 		h.onChannelMutated(uint(id), ch, ch.ID, false)
 	}
@@ -492,6 +501,7 @@ func (h *ServerHandler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id": ch.ID, "parent_id": ch.ParentID, "name": ch.Name, "description": ch.Description,
 		"position": ch.Position, "max_users": ch.MaxUsers, "is_temporary": ch.IsTemporary,
+		"require_tunnel": ch.RequireTunnel,
 	})
 }
 
@@ -510,12 +520,13 @@ func (h *ServerHandler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name        *string  `json:"name"`
-		Description *string  `json:"description"`
-		Position    *int32   `json:"position"`
-		MaxUsers    *uint32  `json:"max_users"`
-		Temporary   *bool    `json:"is_temporary"`
-		Links       []uint32 `json:"links"`
+		Name          *string  `json:"name"`
+		Description   *string  `json:"description"`
+		Position      *int32   `json:"position"`
+		MaxUsers      *uint32  `json:"max_users"`
+		Temporary     *bool    `json:"is_temporary"`
+		RequireTunnel *bool    `json:"require_tunnel"`
+		Links         []uint32 `json:"links"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -536,6 +547,9 @@ func (h *ServerHandler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Temporary != nil {
 		opts.Temporary = body.Temporary
+	}
+	if body.RequireTunnel != nil {
+		opts.RequireTunnel = body.RequireTunnel
 	}
 	if body.Links != nil {
 		opts.Links = body.Links
@@ -580,16 +594,17 @@ func (h *ServerHandler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
 
 // ChannelNode is a channel with nested children for tree display.
 type ChannelNode struct {
-	ID          uint          `json:"id"`
-	ServerID    uint          `json:"server_id"`
-	ParentID    *uint         `json:"parent_id,omitempty"`
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Position    int32         `json:"position"`
-	MaxUsers    uint32        `json:"max_users"`
-	IsTemporary bool          `json:"is_temporary"`
-	CryptoMode  string        `json:"crypto_mode,omitempty"`
-	Children    []ChannelNode `json:"children,omitempty"`
+	ID            uint          `json:"id"`
+	ServerID      uint          `json:"server_id"`
+	ParentID      *uint         `json:"parent_id,omitempty"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	Position      int32         `json:"position"`
+	MaxUsers      uint32        `json:"max_users"`
+	IsTemporary   bool          `json:"is_temporary"`
+	RequireTunnel bool          `json:"require_tunnel"`
+	CryptoMode    string        `json:"crypto_mode,omitempty"`
+	Children      []ChannelNode `json:"children,omitempty"`
 }
 
 func buildChannelTree(channels []models.Channel, parentID *uint, cryptoModes map[uint32]string) []ChannelNode {
@@ -597,16 +612,17 @@ func buildChannelTree(channels []models.Channel, parentID *uint, cryptoModes map
 	for _, c := range channels {
 		if (parentID == nil && c.ParentID == nil) || (parentID != nil && c.ParentID != nil && *c.ParentID == *parentID) {
 			n := ChannelNode{
-				ID:          c.ID,
-				ServerID:    c.ServerID,
-				ParentID:    c.ParentID,
-				Name:        c.Name,
-				Description: c.Description,
-				Position:    c.Position,
-				MaxUsers:    c.MaxUsers,
-				IsTemporary: c.IsTemporary,
-				CryptoMode:  cryptoModes[uint32(c.ID)],
-				Children:    buildChannelTree(channels, ptr(c.ID), cryptoModes),
+				ID:            c.ID,
+				ServerID:      c.ServerID,
+				ParentID:      c.ParentID,
+				Name:          c.Name,
+				Description:   c.Description,
+				Position:      c.Position,
+				MaxUsers:      c.MaxUsers,
+				IsTemporary:   c.IsTemporary,
+				RequireTunnel: c.RequireTunnel,
+				CryptoMode:    cryptoModes[uint32(c.ID)],
+				Children:      buildChannelTree(channels, ptr(c.ID), cryptoModes),
 			}
 			out = append(out, n)
 		}

@@ -48,6 +48,7 @@ type Server struct {
 	userStateRateLimiter sync.Map // session -> *rateWindow
 	channelCryptoMu      sync.RWMutex
 	channelCrypto        map[uint32]string // channelID -> "legacy"|"lite"|"secure"|"mixed"|""
+	channelForceTunnel   map[uint32]bool   // channelID -> operator forced TLS-tunnel (sparse; set only)
 	router               *audio.Router
 	udpConn              net.PacketConn
 	voiceDebug           atomic.Bool
@@ -203,10 +204,9 @@ func (s *Server) HandleUDP(addr net.Addr, data []byte) {
 	// (this forces the client to fall back to TCP tunnel).
 	if codecType == 1 {
 		cid, ok := s.users.ChannelID(senderSession)
-		mixed := ok && s.channelHasMixedCrypto(cid)
-		if mixed {
+		if ok && s.channelRequiresTunnel(cid) {
 			if voiceDebug {
-				slog.Info("[VOICE-DEBUG] HandleUDP: ping suppress (mixed_crypto channel)",
+				slog.Info("[VOICE-DEBUG] HandleUDP: ping suppress (tunnel-required channel)",
 					"session", senderSession, "channel", cid)
 			}
 			return
@@ -267,8 +267,8 @@ func (s *Server) SendAudio(sessionID uint32, packet []byte) error {
 	// but force TCP tunnel when the channel has mixed crypto modes.
 	if recipientAddr != nil && c.Crypt != nil && s.udpConn != nil {
 		cid, uOk := s.users.ChannelID(sessionID)
-		mixed := uOk && s.channelHasMixedCrypto(cid)
-		if !uOk || !mixed {
+		forceTunnel := uOk && s.channelRequiresTunnel(cid)
+		if !uOk || !forceTunnel {
 			addr := recipientAddr.(net.Addr)
 			overhead := c.Crypt.Overhead()
 			enc := make([]byte, len(packet)+overhead)
@@ -286,8 +286,8 @@ func (s *Server) SendAudio(sessionID uint32, packet []byte) error {
 				slog.Error("[VOICE-DEBUG] SendAudio encrypt failed", "recipient", sessionID, "err", encErr)
 			}
 		} else if voiceDebug {
-			slog.Info("[VOICE-DEBUG] SendAudio skipping UDP (mixed_crypto)",
-				"recipient", sessionID, "mixed", mixed)
+			slog.Info("[VOICE-DEBUG] SendAudio skipping UDP (tunnel required)",
+				"recipient", sessionID)
 		}
 	} else if voiceDebug {
 		slog.Info("[VOICE-DEBUG] SendAudio no UDP path",
@@ -371,27 +371,52 @@ func (s *Server) UpdateChannelCrypto(channelID uint32) {
 	s.channelCryptoMu.Unlock()
 }
 
-// channelHasMixedCrypto returns true if the channel (or any of its linked channels)
-// has clients using different crypto modes.
-func (s *Server) channelHasMixedCrypto(channelID uint32) bool {
-	allModes := make(map[string]bool)
+// RefreshChannelForceTunnel rebuilds the set of channels an operator has marked
+// force-tunnel from the channel tree. Cheap and called only on channel config
+// changes (create/update/delete) and at startup, not on the audio path.
+func (s *Server) RefreshChannelForceTunnel() {
+	if s.chans == nil {
+		return
+	}
+	forced := make(map[uint32]bool)
+	for _, ch := range s.chans.GetTree() {
+		if ch != nil && ch.RequireTunnel {
+			forced[ch.ID] = true
+		}
+	}
+	s.channelCryptoMu.Lock()
+	s.channelForceTunnel = forced
+	s.channelCryptoMu.Unlock()
+}
 
+// channelRequiresTunnel reports whether voice destined for a recipient in this
+// channel must be relayed over the TLS control tunnel rather than sent as direct
+// UDP. That is true when the channel (or a linked channel) either has mixed UDP
+// crypto modes, or has been marked force-tunnel by an operator. Forcing the
+// tunnel gives every client TLS-grade (AES-256-GCM) transport for its audio
+// regardless of its negotiated UDP crypto tier, including standard clients that
+// only speak legacy OCB2. The linked set is resolved once and both policies are
+// checked under a single read lock to keep the audio path cheap.
+func (s *Server) channelRequiresTunnel(channelID uint32) bool {
 	channelIDs := []uint32{channelID}
 	if linked := s.chans.LinkedChannelIDs(channelID); len(linked) > 1 {
 		channelIDs = append(channelIDs, linked[1:]...)
 	}
 
+	allModes := make(map[string]bool)
 	s.channelCryptoMu.RLock()
+	defer s.channelCryptoMu.RUnlock()
 	for _, cid := range channelIDs {
+		if s.channelForceTunnel[cid] {
+			return true
+		}
 		if m, ok := s.channelCrypto[cid]; ok && m != "" {
 			if m == "mixed" {
-				s.channelCryptoMu.RUnlock()
 				return true
 			}
 			allModes[m] = true
 		}
 	}
-	s.channelCryptoMu.RUnlock()
 	return len(allModes) > 1
 }
 
@@ -420,16 +445,17 @@ func NewServer(cfg *config.Config, db *gorm.DB, serverID uint, udpConn net.Packe
 	chans := channel.NewManager(db, serverID)
 	_ = acl.EnsureDefaultRootACLs(db, serverID)
 	s := &Server{
-		cfg:           cfg,
-		db:            db,
-		users:         users,
-		chans:         chans,
-		bans:          ban.NewManager(db, serverID),
-		acl:           acl.NewEvaluator(db, chans, users),
-		table:         protocol.NewHandlerTable(),
-		conns:         make(map[uint32]*connection.Conn),
-		channelCrypto: make(map[uint32]string),
-		udpConn:       udpConn,
+		cfg:                cfg,
+		db:                 db,
+		users:              users,
+		chans:              chans,
+		bans:               ban.NewManager(db, serverID),
+		acl:                acl.NewEvaluator(db, chans, users),
+		table:              protocol.NewHandlerTable(),
+		conns:              make(map[uint32]*connection.Conn),
+		channelCrypto:      make(map[uint32]string),
+		channelForceTunnel: make(map[uint32]bool),
+		udpConn:            udpConn,
 	}
 	voiceDebug := cfg.VoiceDebug
 	s.voiceDebug.Store(voiceDebug)
@@ -457,6 +483,7 @@ func NewServer(cfg *config.Config, db *gorm.DB, serverID uint, udpConn net.Packe
 		VoiceDebug:      voiceDebug,
 	})
 	s.registerHandlers()
+	s.RefreshChannelForceTunnel()
 	return s
 }
 
