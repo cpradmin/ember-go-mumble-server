@@ -80,7 +80,14 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	mumbleAddr := formatAddr(cfg.Host, cfg.MumblePort)
-	restAddr := formatAddr(cfg.Host, cfg.RESTPort)
+	// The admin REST API binds to its own host (default loopback) so the
+	// management plane is NOT exposed on every interface the voice listener uses.
+	// Empty falls back to loopback (never 0.0.0.0) to stay secure-by-default.
+	restHost := cfg.RESTHost
+	if restHost == "" {
+		restHost = "127.0.0.1"
+	}
+	restAddr := formatAddr(restHost, cfg.RESTPort)
 
 	tcpLn, err := transport.TCPListener(ctx, mumbleAddr, certPEM, keyPEM)
 	if err != nil {

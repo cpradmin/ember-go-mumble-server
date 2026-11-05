@@ -155,6 +155,8 @@ func ConfigForServer(meta *MetaConfig, server *ServerConfigData, bootstrap *Conf
 		cfg.SSLKeyPath = bootstrap.SSLKeyPath
 		cfg.LogLevel = bootstrap.LogLevel
 		cfg.FrontendEmbed = bootstrap.FrontendEmbed
+		// REST bind host is a bootstrap (file/env) setting, not DB/API-mutable.
+		cfg.RESTHost = bootstrap.RESTHost
 	}
 	if cfg.RegisterName == "" {
 		cfg.RegisterName = "go-mumble-server"

@@ -11,8 +11,13 @@
 port = 64738
 # REST management API port
 rest_port = 64730
-# Bind address
+# Bind address for the Mumble voice/control listener (reachable by clients)
 host = "0.0.0.0"
+# Bind address for the ADMIN REST API. Defaults to loopback so the management
+# plane is NOT exposed on every interface like the voice port. Bootstrap-only
+# (restart to change; not editable via the REST API). For remote admin, put a
+# reverse proxy (e.g. Caddy) in front. Set "0.0.0.0" only if you understand why.
+rest_host = "127.0.0.1"
 
 [tls]
 # TLS certificate and key (PEM format)

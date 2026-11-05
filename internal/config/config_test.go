@@ -17,6 +17,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.RESTPort != 64730 {
 		t.Errorf("RESTPort = %d, want 64730", cfg.RESTPort)
 	}
+	if cfg.RESTHost != "127.0.0.1" {
+		t.Errorf("RESTHost = %q, want 127.0.0.1 (admin API loopback by default)", cfg.RESTHost)
+	}
 	if cfg.DatabasePath != "mumble-server.sqlite" {
 		t.Errorf("DatabasePath = %q, want mumble-server.sqlite", cfg.DatabasePath)
 	}
@@ -29,6 +32,7 @@ func TestLoad_FromFile(t *testing.T) {
 [network]
 port = 64739
 rest_port = 9091
+rest_host = "0.0.0.0"
 host = "127.0.0.1"
 
 [database]
@@ -52,6 +56,9 @@ level = "debug"
 	}
 	if cfg.Host != "127.0.0.1" {
 		t.Errorf("Host = %q, want 127.0.0.1", cfg.Host)
+	}
+	if cfg.RESTHost != "0.0.0.0" {
+		t.Errorf("RESTHost = %q, want 0.0.0.0 (explicit file override)", cfg.RESTHost)
 	}
 	if cfg.DatabasePath != "/var/lib/mumble/db.sqlite" {
 		t.Errorf("DatabasePath = %q, want /var/lib/mumble/db.sqlite", cfg.DatabasePath)

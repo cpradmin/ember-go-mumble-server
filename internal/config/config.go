@@ -11,9 +11,13 @@ import (
 
 // Config holds the server configuration.
 type Config struct {
-	Host           string
-	MumblePort     int
-	RESTPort       int
+	Host       string
+	MumblePort int
+	RESTPort   int
+	// RESTHost is the bind address for the admin REST API. It defaults to
+	// loopback so the management plane is not exposed on every interface the
+	// voice listener uses. Bootstrap-only (file/env); not mutable via the API.
+	RESTHost       string
 	FrontendEmbed  bool
 	DatabasePath   string
 	SSLCertPath    string
@@ -48,6 +52,7 @@ type fileConfig struct {
 	Network struct {
 		Port     int    `toml:"port"`
 		RestPort int    `toml:"rest_port"`
+		RestHost string `toml:"rest_host"`
 		Host     string `toml:"host"`
 	} `toml:"network"`
 	TLS struct {
@@ -86,6 +91,7 @@ func defaults() *Config {
 		Host:          "0.0.0.0",
 		MumblePort:    64738,
 		RESTPort:      64730,
+		RESTHost:      "127.0.0.1",
 		FrontendEmbed: true,
 		DatabasePath:  "mumble-server.sqlite",
 		LogLevel:      "info",
@@ -133,6 +139,9 @@ func applyFileConfig(cfg *Config, fc *fileConfig) {
 	}
 	if fc.Network.RestPort != 0 {
 		cfg.RESTPort = fc.Network.RestPort
+	}
+	if fc.Network.RestHost != "" {
+		cfg.RESTHost = fc.Network.RestHost
 	}
 	if fc.TLS.Cert != "" {
 		cfg.SSLCertPath = fc.TLS.Cert
@@ -183,6 +192,9 @@ func applyEnv(cfg *Config) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.RESTPort = n
 		}
+	}
+	if v := os.Getenv("MUMBLE_REST_HOST"); v != "" {
+		cfg.RESTHost = v
 	}
 	if v := os.Getenv("MUMBLE_DATABASE_PATH"); v != "" {
 		cfg.DatabasePath = v
